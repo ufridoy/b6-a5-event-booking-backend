@@ -11,3 +11,293 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum EventVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum EventStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum ParticipantStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BANNED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentGateway {
+  SSLCOMMERZ
+  SHURJOPAY
+  STRIPE
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  avatar    String?
+  bio       String?
+  role      UserRole @default(USER)
+  isBlocked Boolean  @default(false)
+  isDeleted Boolean  @default(false)
+
+  // Settings
+  notificationsEnabled Boolean @default(true)
+
+  // Auth / audit
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  createdEvents        Event[]            @relation("EventCreator")
+  approvedParticipants EventParticipant[] @relation("ParticipantApprovedBy")
+  sentInvitations      Invitation[]       @relation("InvitationSender")
+  receivedInvitations  Invitation[]       @relation("InvitationReceiver")
+  eventParticipants    EventParticipant[] @relation("ParticipantUser")
+  reviews              Review[]           @relation("ReviewAuthor")
+  payments             Payment[]
+  moderatedEvents      Event[]            @relation("EventDeletedBy")
+  deletedReviews       Review[]           @relation("ReviewDeletedBy")
+
+  emailVerified Boolean   @default(false)
+  image         String?
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+model Event {
+  id              String          @id @default(uuid())
+  title           String
+  slug            String          @unique
+  description     String
+  dateTime        DateTime
+  venue           String?
+  eventLink       String?
+  coverImage      String?
+  visibility      EventVisibility
+  registrationFee Decimal         @default(0.00) @db.Decimal(10, 2)
+  status          EventStatus     @default(UPCOMING)
+  featured        Boolean         @default(false)
+  maxParticipants Int?
+  isDeleted       Boolean         @default(false)
+
+  creatorId String
+  creator   User   @relation("EventCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  deletedById String?
+  deletedBy   User?   @relation("EventDeletedBy", fields: [deletedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants EventParticipant[]
+  invitations  Invitation[]
+  reviews      Review[]
+  payments     Payment[]
+
+  @@index([creatorId])
+  @@index([visibility, registrationFee])
+  @@index([dateTime])
+  @@index([featured])
+  @@map("events")
+}
+
+model EventParticipant {
+  id String @id @default(uuid())
+
+  eventId String
+  userId  String
+
+  status        ParticipantStatus @default(PENDING)
+  paymentStatus PaymentStatus     @default(UNPAID)
+
+  joinedAt    DateTime?
+  requestedAt DateTime  @default(now())
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  bannedAt    DateTime?
+  leftAt      DateTime?
+
+  approvalNote    String?
+  rejectionReason String?
+  banReason       String?
+
+  approvedById String?
+  approvedBy   User?   @relation("ParticipantApprovedBy", fields: [approvedById], references: [id])
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation("ParticipantUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([eventId, userId])
+  @@index([eventId, status])
+  @@index([userId, status])
+  @@map("event_participants")
+}
+
+model Invitation {
+  id String @id @default(uuid())
+
+  eventId    String
+  senderId   String
+  receiverId String
+
+  status        InvitationStatus @default(PENDING)
+  paymentStatus PaymentStatus    @default(UNPAID)
+  message       String?
+
+  sentAt      DateTime  @default(now())
+  respondedAt DateTime?
+  expiresAt   DateTime?
+
+  event    Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sender   User  @relation("InvitationSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User  @relation("InvitationReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([eventId, receiverId])
+  @@index([receiverId, status])
+  @@index([senderId])
+  @@map("invitations")
+}
+
+model Payment {
+  id String @id @default(uuid())
+
+  eventId       String
+  userId        String
+  participantId String?
+
+  gateway          PaymentGateway
+  amount           Decimal        @db.Decimal(10, 2)
+  status           PaymentStatus  @default(PENDING)
+  transactionId    String?        @unique
+  gatewayPaymentId String?
+  currency         String         @default("BDT")
+
+  paidAt        DateTime?
+  failureReason String?
+  metadata      Json?
+
+  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  participant EventParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+  @@index([userId])
+  @@index([participantId])
+  @@index([status])
+  @@map("payments")
+}
+
+model Review {
+  id String @id @default(uuid())
+
+  eventId String
+  userId  String
+
+  rating    Int
+  comment   String?
+  isDeleted Boolean @default(false)
+
+  deletedById String?
+  deletedBy   User?   @relation("ReviewDeletedBy", fields: [deletedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation("ReviewAuthor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
