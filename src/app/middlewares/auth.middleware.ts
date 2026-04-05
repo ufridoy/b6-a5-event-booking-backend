@@ -3,6 +3,7 @@ import { auth } from "../lib/auth";
 import { fromNodeHeaders } from "better-auth/node";
 import { sendResponse } from "../shared/sendResponse";
 import status from "http-status";
+import { prisma } from "../lib/prisma";
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -18,13 +19,29 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
             })
         }
 
-        req.user = session.user;
+        const dbUser = await prisma.user.findUnique({
+            where: {
+                id: session.user.id
+            }
+        })
+
+        if (!dbUser) {
+            return sendResponse(res, {
+                httpStatusCode: status.UNAUTHORIZED,
+                success: false,
+                message: "Unauthorized",
+                data: null
+            })
+        }
+
+        req.user = dbUser;
         req.session = session.session;
 
         next();
     } catch (error) {
 
-        console.error(error);
+        console.error("Auth Middleware Error:", error);
+        
         return sendResponse(res, {
             httpStatusCode: status.INTERNAL_SERVER_ERROR,
             success: false,

@@ -7,6 +7,7 @@ declare global {
         email: string;
         emailVerified: boolean;
         image?: string | null;
+        role: "ADMIN" | "USER";
         createdAt: Date;
         updatedAt: Date;
       };
